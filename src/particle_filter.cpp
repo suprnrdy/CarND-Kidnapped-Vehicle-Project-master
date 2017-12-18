@@ -90,12 +90,12 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
   
   //Observations = landmarks found by lidar
   //Predicted = landmarks in the particle's orientation
-  for(int i = 0; i < predicted.size(); i++) {
-    double min_distance = dist(predicted[i].x, predicted[i].y, observations[0].x, observations[0].y);
-    for(int l = 1; l < observations.size(); l++){
-      double distance = dist(predicted[i].x, predicted[i].y, observations[i].x, observations[i].y);
+  for(int i = 0; i < observations.size(); i++) {
+    double min_distance = dist(predicted[0].x, predicted[0].y, observations[i].x, observations[i].y);
+    for(int l = 1; l < predicted.size(); l++){
+      double distance = dist(predicted[l].x, predicted[l].y, observations[i].x, observations[i].y);
       if(distance < min_distance) {
-        observations[i].id = predicted[i].id;
+        observations[i].id = predicted[l].id;
       }
     }
   }
@@ -115,17 +115,33 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   http://planning.cs.uiuc.edu/node99.html
   //
   
+  // Find all landmarks within sensor range
+  
+  
   // Predict measurements to map landmarks within sensor range for each particle
   for(int p = 0; p < num_particles; p++) {
-    std::vector<LandmarkObs> t_obs = observations;
-    // Convert landmark observations into Map coordinate system
+    std::vector<LandmarkObs> t_obs;
+    std::vector<LandmarkObs> landmark_inrange;
+
+    // Loop through each observation and add to t_obs if within range
     for(int i = 0; i < observations.size(); i++){
+      // Convert in range observations into Map coordinate system
       double xm = particles[i].x + (cos(-M_PI/2)*observations[i].x - (sin(-M_PI/2)*observations[i].y));
       double ym = particles[i].y + (sin(-M_PI/2)*observations[i].x + (cos(-M_PI/2)*observations[i].y));
-      LandmarkObs t_ob = {observations[i].id, xm, ym};
-      t_obs.push_back(t_ob);
+      if(dist(xm, ym, particles[i].x, particles[i].y) <= sensor_range) {
+        LandmarkObs t_ob = {observations[i].id, xm, ym};
+        t_obs.push_back(t_ob);
+      }
     }
-//    dataAssociation(, <#std::vector<LandmarkObs> &observations#>)
+    
+    for(int i = 0; i < map_landmarks.landmark_list.size(); i++) {
+      if(dist(map_landmarks.landmark_list.at(i).x_f, map_landmarks.landmark_list.at(i).y_f, particles[i].x, particles[i].y) <= sensor_range) {
+        landmark_inrange.push_back(map_landmarks.landmark_list.at(i));
+      }
+    }
+    
+    // Now do a data association to associate each observation with a landmark
+    dataAssociation(t_obs, landmark_inrange);
     // Calculate particle's Final weight
   }
   
