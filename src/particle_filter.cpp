@@ -19,35 +19,57 @@
 
 using namespace std;
 
+bool dbg_particle = false;
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
   if(!is_initialized) {
-    num_particles = 100;
-    
+    num_particles = 200;
+    double sample_x, sample_y, sample_theta;
     default_random_engine eng;
-    normal_distribution<double> dist_x(x, std[0]);
-    normal_distribution<double> dist_y(y, std[1]);
-    normal_distribution<double> dist_theta(theta, std[2]);
+    normal_distribution<double> dist_x(0, std[0]);
+    normal_distribution<double> dist_y(0, std[1]);
+    normal_distribution<double> dist_theta(0, std[2]);
     
     for(int i = 0; i < num_particles; i++) {
-      double sample_x, sample_y, sample_theta;
+      
+      
       sample_x = dist_x(eng);
       sample_y = dist_y(eng);
       sample_theta = dist_theta(eng);
       
-      Particle part = {
+      Particle p = {
         i,            // id
-        sample_x,     // x
-        sample_y,     // y
-        sample_theta, // theta
-        1             // weight
+        x,     // x
+        y,     // y
+        theta, // theta
+        1           // weight
       };
-//      cout << "Partical Initialized: " << i << ", " << x << ", " << y << ", " << theta << endl;
-      particles.push_back(part);
-      weights.push_back(1);
+      
+      // Add noise
+      if(!dbg_particle) {
+        p.x += sample_x;
+        p.y += sample_y;
+        p.theta += sample_theta;
+      } else {
+        p.weight = 0;
+      }
+
+      cout << "Partical Initialized: " << i << ", " << p.x << ", " << p.y << ", " << p.theta << endl;
+      
+      particles.push_back(p);
+      if(!dbg_particle) {
+        weights.push_back(1);
+      } else {
+        weights.push_back(0);
+      }
+    }
+    if(dbg_particle) {
+      weights[0] = 1;
+      particles[0].weight = 1;
     }
     is_initialized = true;
   }
@@ -62,28 +84,31 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
   double vyaw = velocity/yaw_rate;
   double tdt = yaw_rate * delta_t;
   
+  normal_distribution<double> dist_x(0, std_pos[0]);
+  normal_distribution<double> dist_y(0, std_pos[1]);
+  normal_distribution<double> dist_theta(0, std_pos[2]);
+  default_random_engine eng;
+  
   for(int i = 0; i < num_particles; i++) {
-    double sample_x, sample_y, sample_theta;
-    default_random_engine eng;
     
     if(fabs(yaw_rate) > 0) {
-      sample_x = particles[i].x + vyaw * (sin(particles[i].theta + tdt) - sin(particles[i].theta));
-      sample_y = particles[i].y + vyaw * (cos(particles[i].theta) - cos(particles[i].theta + tdt));
-      sample_theta = particles[i].theta + tdt;
-      normal_distribution<double> dist_theta(sample_theta, std_pos[2]);
-      particles[i].theta = dist_theta(eng);
+      particles[i].x += vyaw * (sin(particles[i].theta + tdt) - sin(particles[i].theta));
+      particles[i].y += vyaw * (cos(particles[i].theta) - cos(particles[i].theta + tdt));
+      particles[i].theta += tdt;
+      
     } else {
-      sample_x = particles[i].x + vdt * cos(particles[i].theta);
-      sample_y = particles[i].y + vdt * sin(particles[i].theta);
+      particles[i].x += vdt * cos(particles[i].theta);
+      particles[i].y += vdt * sin(particles[i].theta);
       
     }
     
-    normal_distribution<double> dist_x(sample_x, std_pos[0]);
-    normal_distribution<double> dist_y(sample_y, std_pos[1]);
-    
-    particles[i].x = dist_x(eng);
-    particles[i].y = dist_y(eng);
-//    cout << "Predicted: " << sample_x << ", " << sample_y << ", " << particles[i].theta << endl;
+    // Add Noise
+    if(!dbg_particle) {
+      particles[i].x += dist_x(eng);
+      particles[i].y += dist_y(eng);
+      particles[i].theta += dist_theta(eng);
+//      cout << "Predicted: " << particles[i].x << ", " << particles[i].y << ", " << particles[i].theta << endl;
+    }
   }
 }
 
@@ -96,23 +121,24 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
   //Observations = landmarks found by lidar
   //Predicted = landmarks from the map
   
-  
-  std::vector<LandmarkObs> landmarks = predicted;
+  std::vector<LandmarkObs> p = predicted;
   for(int i = 0; i < observations.size(); i++) {
 //    cout << "=================================" << endl;
 //    cout << "Observation: " << i << endl;
-    double min_distance = 1000;
-    int index = 0;
-    for(int l = 0; l < landmarks.size(); l++){
-      double distance = dist(landmarks[l].x, landmarks[l].y, observations[i].x, observations[i].y);
+    double min_distance = numeric_limits<double>::max();
+    LandmarkObs o = observations[i];
+    int map_id = -1;
+    for(int l = 0; l < p.size(); l++){
+      double distance = dist(p[l].x, p[l].y, o.x, o.y);
       if(distance < min_distance) {
         min_distance = distance;
+        map_id = p[l].id;
+//        index = l;
 //        cout << landmarks[l].id << " distance: " << distance <<  endl;
-        observations[i].id = landmarks[l].id;
-        index = l;
       }
     }
-    landmarks.erase(landmarks.begin() + index);
+    observations[i].id = map_id;
+//    landmarks.erase(landmarks.begin() + index);
 //    cout << "Landmark: " << observations[i].id << endl;
 //    cout << "=================================" << endl;
   }
@@ -130,6 +156,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], c
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
   //
+//  if(dbg_particle) return;
   
   // Predict measurements to map landmarks within sensor range for each particle
   for(int p = 0; p < num_particles; p++) {
@@ -138,30 +165,27 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], c
     
     //Create list of landmarks within Sensor Range
     for(int i = 0; i < map_landmarks.landmark_list.size(); i++) {
-      /*if(dist(map_landmarks.landmark_list.at(i).x_f, map_landmarks.landmark_list.at(i).y_f, particles[i].x, particles[i].y) <= sensor_range) {
-        int idm = map_landmarks.landmark_list.at(i).id_i;
-        double xm = map_landmarks.landmark_list.at(i).x_f;
-        double ym = map_landmarks.landmark_list.at(i).y_f;
-        LandmarkObs land = {idm, xm, ym};
-        landmark_inrange.push_back(land);
-      }*/
       int idm = map_landmarks.landmark_list.at(i).id_i;
       double xm = map_landmarks.landmark_list.at(i).x_f;
       double ym = map_landmarks.landmark_list.at(i).y_f;
-      LandmarkObs land = {idm, xm, ym};
-      landmark_inrange.push_back(land);
+      
+      if(!dbg_particle) {
+        if(dist(xm, ym, particles[i].x, particles[i].y) <= sensor_range) {
+           landmark_inrange.push_back(LandmarkObs{idm, xm, ym});
+         }
+      } else {
+        landmark_inrange.push_back(LandmarkObs{idm, xm, ym});
+//        cout << "Observations: " << observations.size() << " Landmarks: " << landmark_inrange.size() << endl;
+      }
     }
-
-//    cout << "Observations: " << observations.size() << " Landmarks: " << landmark_inrange.size() << endl;
-    
+  
     // Loop through each observation and add to t_obs if within range
     for(int i = 0; i < observations.size(); i++){
       // Convert in range observations into Map coordinate system
       double xm = particles[p].x + cos(particles[p].theta)*observations[i].x - sin(particles[p].theta)*observations[i].y;
       double ym = particles[p].y + sin(particles[p].theta)*observations[i].x + cos(particles[p].theta)*observations[i].y;
-      
-      LandmarkObs t_ob = {observations[i].id, xm, ym};
-      t_obs.push_back(t_ob);
+
+      t_obs.push_back(LandmarkObs{observations[i].id, xm, ym});
     }
     
     // Now do a data association to associate each observation with a landmark
@@ -169,22 +193,36 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], c
     SetAssociations(particles[p], t_obs);
     
     // Calculate particle's Final weight
-    double weight = 1;
-    double rhox = std_landmark[0];
-    double rhoy = std_landmark[1];
+    weights[p] = 1.0;
+    particles[p].weight = 1.0;
+    double sig_x = std_landmark[0];
+    double sig_y = std_landmark[1];
+    
     for(int i = 0; i < t_obs.size(); i++){
-      double xdiff = pow(t_obs[i].x - landmark_inrange[t_obs[i].id - 1].x, 2)/(2*pow(rhox, 2));
-      double ydiff = pow(t_obs[i].y - landmark_inrange[t_obs[i].id - 1].y, 2)/(2*pow(rhoy, 2));
-      double p_obs = (1/(2 * M_PI * rhox * rhoy)) * pow(M_E,-(xdiff + ydiff));
+      double l_x, l_y, o_x, o_y;
+      o_x = t_obs[i].x;
+      o_y = t_obs[i].y;
+      int ass_id = t_obs[i].id;
+      for(int k = 0; k < landmark_inrange.size(); k++) {
+        if(landmark_inrange[k].id == ass_id) {
+          l_x = landmark_inrange[k].x;
+          l_y = landmark_inrange[k].y;
+        }
+      }
+      // calculate normalization term
+      double gauss_norm = (1/(2 * M_PI * sig_x * sig_y));
+      // calculate exponent
+      double exponent = pow(o_x - l_x, 2)/(2*pow(sig_x, 2)) + pow(o_y - l_y, 2)/(2*pow(sig_y, 2));
+      // Calculate weight using normalization terms and
+      double weight = gauss_norm * exp(-exponent);
 //      cout << "Observation Probability: " << p_obs << endl;
-      weight *= p_obs;
+      particles[p].weight *= weight;
+      weights[p] = particles[p].weight;
       
 //      cout << "Obss: " << observations[i].x << ", " << observations[i].y
 //      << " t_obs: " << t_obs[i].x << ", " << t_obs[i].y << " Ass lm: " << t_obs[i].id
 //      << " lm coords: " << landmark_inrange[t_obs[i].id - 1].x << ", " << landmark_inrange[t_obs[i].id - 1].y << endl;
     }
-    weights[p] = weight;
-    particles[p].weight = weight;
 //    cout << "Particle: " << p << " weight: " << weight << endl;
   }
 }
@@ -193,6 +231,8 @@ void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+  
+//  if(dbg_particle) return;
   
   // Resampling wheel
   double beta = 0.0;
